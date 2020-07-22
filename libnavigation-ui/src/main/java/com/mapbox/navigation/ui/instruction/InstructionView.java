@@ -114,6 +114,7 @@ public class InstructionView extends RelativeLayout implements LifecycleObserver
   private LegStep currentStep;
   private NavigationViewModel navigationViewModel;
   private InstructionListListener instructionListListener;
+  private GuidanceViewListener guidanceViewListener;
 
   private DistanceFormatter distanceFormatter;
   private boolean isRerouting;
@@ -126,6 +127,17 @@ public class InstructionView extends RelativeLayout implements LifecycleObserver
     @Override
     public void onGuidanceImageReady(@NotNull Bitmap bitmap) {
       animateShowGuidanceViewImage();
+      guidanceViewImage.addOnLayoutChangeListener(new OnLayoutChangeListener() {
+        @Override
+        public void onLayoutChange(View view, int left, int top, int right, int bottom, int oldLeft, int oldTop,
+            int oldRight, int oldBottom) {
+          guidanceViewImage.removeOnLayoutChangeListener(this);
+          if (guidanceViewListener != null) {
+            guidanceViewListener.onShownAt(left, top, guidanceViewImage.getMeasuredWidth(),
+                guidanceViewImage.getMeasuredHeight());
+          }
+        }
+      });
       guidanceViewImage.setImageBitmap(bitmap);
     }
 
@@ -421,6 +433,16 @@ public class InstructionView extends RelativeLayout implements LifecycleObserver
     } else {
       animateHideGuidanceViewImage();
     }
+  }
+
+  /**
+   * Set the listener which will be called when GuidanceView visibility changes
+   *
+   * @param guidanceViewListener the listener
+   */
+  public void setGuidanceViewListener(
+      GuidanceViewListener guidanceViewListener) {
+    this.guidanceViewListener = guidanceViewListener;
   }
 
   /**
@@ -843,6 +865,9 @@ public class InstructionView extends RelativeLayout implements LifecycleObserver
     if (guidanceViewImage.getVisibility() == VISIBLE) {
       beginGuidanceImageDelayedTransition();
       guidanceViewImage.setVisibility(GONE);
+      if (guidanceViewListener != null) {
+        guidanceViewListener.onHidden();
+      }
     }
   }
 
