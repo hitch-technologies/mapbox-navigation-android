@@ -1,17 +1,20 @@
 package com.mapbox.navigation.ui.instruction
 
-import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.drawable.Drawable
+import android.graphics.BitmapFactory
 import com.mapbox.api.directions.v5.models.BannerComponents
 import com.mapbox.api.directions.v5.models.BannerInstructions
+import com.mapbox.navigation.utils.internal.JobControl
+import com.mapbox.navigation.utils.internal.ThreadController
 import com.mapbox.navigation.utils.internal.ifNonNull
-import com.squareup.picasso.OkHttp3Downloader
-import com.squareup.picasso.Picasso
-import com.squareup.picasso.Target
-import java.lang.Exception
+import java.io.IOException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
+import okhttp3.Request
 
 /**
  * The class serves as a medium to emit bitmaps for the respective guidance view URL embedded in
@@ -25,12 +28,7 @@ class GuidanceViewImageProvider() {
         private val USER_AGENT_VALUE = "MapboxJava/"
     }
 
-    /**
-     * This is added a solution to bypass the issue with Picasso where [com.squareup.picasso.Target]
-     * get's garbage collected and guidance view is hence not rendered. Found the solution here
-     * https://stackoverflow.com/questions/24180805/onbitmaploaded-of-target-object-not-called-on-first-load#answers
-     */
-    private val targets: MutableList<Target> = mutableListOf()
+    private val mainJobController: JobControl by lazy { ThreadController.getMainScopeAndRootJob() }
     private val okHttpClient = OkHttpClient.Builder().addInterceptor { chain: Interceptor.Chain ->
         chain.proceed(
             chain.request().newBuilder().addHeader(USER_AGENT_KEY, USER_AGENT_VALUE).build()
@@ -40,41 +38,26 @@ class GuidanceViewImageProvider() {
     /**
      * The API reads the bannerInstruction and returns a guidance view bitmap if one is available
      * @param bannerInstructions [BannerInstructions]
-     * @param context [Context]
      * @param callback [OnGuidanceImageDownload] Callback that is triggered based on appropriate state of image downloading
      */
     fun renderGuidanceView(
         bannerInstructions: BannerInstructions,
-        context: Context,
         callback: OnGuidanceImageDownload
     ) {
-        val target = object : Target {
-            override fun onPrepareLoad(placeHolderDrawable: Drawable?) {
-            }
-
-            override fun onBitmapFailed(e: Exception?, errorDrawable: Drawable?) {
-                targets.remove(this)
-                callback.onFailure(e?.message)
-            }
-
-            override fun onBitmapLoaded(bitmap: Bitmap?, from: Picasso.LoadedFrom?) {
-                targets.remove(this)
-                ifNonNull(bitmap) { b ->
-                    callback.onGuidanceImageReady(b)
-                } ?: callback.onFailure("Something went wrong. Bitmap not received")
-            }
-        }
         val bannerView = bannerInstructions.view()
         ifNonNull(bannerView) { view ->
             val bannerComponents = view.components()
             ifNonNull(bannerComponents) { components ->
                 components.forEachIndexed { _, component ->
                     component.takeIf { c -> c.type() == BannerComponents.GUIDANCE_VIEW }?.let {
-                        targets.add(target)
-                        Picasso.Builder(context).downloader(OkHttp3Downloader(okHttpClient))
-                            .build()
-                            .load(it.imageUrl())
-                            .into(target)
+                        ifNonNull(it.imageUrl()) { url ->
+                            mainJobController.scope.launch {
+                                val response = getBitmap(url)
+                                response.bitmap?.let { b ->
+                                    callback.onGuidanceImageReady(b)
+                                } ?: callback.onFailure(response.error)
+                            }
+                        } ?: callback.onFailure("Guidance View Image URL is null")
                     }
                 }
             } ?: callback.onNoGuidanceImageUrl()
@@ -83,16 +66,35 @@ class GuidanceViewImageProvider() {
 
     /**
      * The API allows you to cancel the rendering of guidance view.
-     * @param context Context
      */
-    fun cancelRender(context: Context) {
-        if (targets.isNotEmpty()) {
-            for(target in targets) {
-                Picasso.Builder(context).build().cancelRequest(target)
-            }
-            targets.clear()
-        }
+    fun cancelRender() {
+        mainJobController.job.cancelChildren()
     }
+
+    private suspend fun getBitmap(url: String): GuidanceViewImageResponse =
+        withContext(Dispatchers.IO) {
+            val req = Request.Builder().url(url).build()
+            try {
+                val res = okHttpClient.newCall(req).execute()
+                val body = res.body()
+                val message = res.message()
+                val code = res.code()
+                res.close()
+                when (code) {
+                    401 -> GuidanceViewImageResponse(null, message)
+                    200 -> GuidanceViewImageResponse(
+                        BitmapFactory.decodeStream(
+                            body?.byteStream()
+                        ), "Something went wrong. Bitmap not received"
+                    )
+                    else -> GuidanceViewImageResponse(null, "Something went wrong. Bitmap not received")
+                }
+            } catch (exception: IOException) {
+                GuidanceViewImageResponse(null, "Something went wrong. Bitmap not received")
+            }
+        }
+
+    internal data class GuidanceViewImageResponse(val bitmap: Bitmap?, val error: String?)
 
     /**
      * Callback that is triggered based on appropriate state of image downloading
