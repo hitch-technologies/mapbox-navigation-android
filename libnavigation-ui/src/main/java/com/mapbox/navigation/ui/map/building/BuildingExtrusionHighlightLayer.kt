@@ -115,7 +115,7 @@ class BuildingExtrusionHighlightLayer(private val mapboxMap: MapboxMap) {
                         fillExtrusionOpacity(opacity),
                         fillExtrusionHeight(get("height"))
                 )
-                MapUtils.addLayerToMap(style, this, HIGHLIGHTED_BUILDING_FOOTPRINT_LAYER_ID)
+                MapUtils.addLayerToMap(style, this, null)
             }
         }
     }

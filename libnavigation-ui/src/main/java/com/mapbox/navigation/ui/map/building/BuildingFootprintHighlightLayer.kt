@@ -10,6 +10,7 @@ import com.mapbox.mapboxsdk.style.layers.PropertyFactory.fillColor
 import com.mapbox.mapboxsdk.style.layers.PropertyFactory.fillOpacity
 import com.mapbox.mapboxsdk.style.layers.PropertyFactory.visibility
 import com.mapbox.navigation.ui.internal.utils.MapUtils
+import com.mapbox.navigation.ui.map.building.BuildingLayerSupport.Companion.BUILDING_LAYER_ID
 
 /**
  * This layer handles the creation and customization of a [FillLayer]
@@ -111,7 +112,7 @@ class BuildingFootprintHighlightLayer(private val mapboxMap: MapboxMap) {
                         fillColor(color),
                         fillOpacity(opacity)
                 )
-                MapUtils.addLayerToMap(style, this, BuildingLayerSupport.BUILDING_LAYER_ID)
+                MapUtils.addLayerToMapAbove(style, this, BuildingLayerSupport.BUILDING_LAYER_ID)
             }
         }
     }
